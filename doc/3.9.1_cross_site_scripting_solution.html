@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Cross Site Scripting Solution</title>
+		<link rel="stylesheet" href="../style.css">
+	</head>
+	<body>
+		<div class="wrapper">
+			<h1>Cross Site Scripting Solution</h1>
+			<div class="navlinks">
+				<ul class="horizontal">
+					<li><a href="../index.html">Home</a></li>
+					<li><a href="3.9.1_cross_site_mechanisms.html">Cross Site Mechanisms</a></li>
+					<li><a href="3.9.1_cross_site_scripting.html">Exercise</a></li>
+				</ul>
+			</div>
+
+			<h2 id="introduction">Introduction</h2>
+			<p>
+				Cross site scripting vulnerabilities allow an attacker to execute browser scripts on a victim's machine. The attack is delivered through a benign or trusted web site that contains this vulnerability. In a successful attack, the victim's browser will load the attacking script and execute it.
+			</p>
+
+			<p>
+				Most cross site scripting attacks fall into two categories: stored or reflected. Stored cross site scripting attacks have some persistence over time and separate visits. For example, if a script is injected into a public-facing comment, then any user who visits the page containing that comment will be affected. In the case of reflected cross site scripting, the attack originates in a malicious link or web site and is "reflected" off the vulnerable site. For example, if a web site shows an error message whose content is taken from an HTTP request parameter, then an attacker can craft a link where the parameter contains a malicious script; this malicious script is then present on the loaded web page.
+			</p>
+
+			<h2 id="exploit">Exploiting the Vulnerability</h2>
+			<p>
+				The attack vector starts with the login form, which stores any username string with the session. Any subsequent request with that session will then load that string and display it on the web site. To exploit the vulnerability, we need only specify a malicious script as the username to the login servlet. The following link should be in our <code>bad_link.html</code> page to execute this cross site scripting attack:
+			</p>
+
+			<pre><code>&lt;!-- replace the href string below with your cross site script attack link --&gt;&#10;&lt;a href=&#33.http://localhost:8080/login?username=&lt;script&gt;window.alert('hacked');&lt;/script&gt;&#33.&gt;cross site script&lt;/a&gt;</code></pre>
+
+			<h2 id="mitigate">Mitigating the Vulnerability</h2>
+			<p>
+				Once the character class is defined, it is quite simple to implement a regex filter for the username input. Note that it is not strictly necessary to filter both the input to the login and the output from the view page servlet, but this redundancy is prudent in light of future potential attack surfaces (were this a real/growing application).
+			</p>
+
+			<p>
+				This is the updated login servlet code:
+			</p>
+
+			<pre><code>import java.io.IOException;
+import java.util.regex.Pattern;
+
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+/**
+ * Java servlet for creating a session and attaching two attributes: a username
+ * and a counter. Does not consider existing sessions.
+ * 
+ * @author Joseph Eichenhofer
+ */
+public class LoginServlet extends HttpServlet {
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see
+	 * javax.servlet.http.HttpServlet#doGet(javax.servlet.http.HttpServletRequest,
+	 * javax.servlet.http.HttpServletResponse)
+	 * 
+	 * Create a session for the specified username (no checks of
+	 * password/authentication). Does not consider existing sessions with same
+	 * username. Initialize clicks to zero.
+	 */
+	@Override
+	protected void doGet(HttpServletRequest req, HttpServletResponse res) throws IOException {
+		// check for username parameter
+		String username = req.getParameter("username");
+		
+		if (!Pattern.matches("[\\p{L}\\p{Digit}_-]+", username)) {
+			res.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid username characters");
+			return;
+		}
+		
+		if (username != null && !username.equals("")) {
+			// request contained a username, set session attribute for username and
+			// initialize click count to zero
+			req.getSession(true).setAttribute("username", username);
+			req.getSession().setAttribute("clicks", new Integer(0));
+		}
+
+		// redirect to main page
+		res.sendRedirect("view");
+	}
+}</code></pre>
+
+		<p>
+			This is the updated view page code:
+		</p>
+
+		<pre><code>import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.regex.Pattern;
+
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
+
+/**
+ * Display either a form or the current number of registered clicks for a
+ * session.
+ * 
+ * @author Joseph Eichenhofer
+ */
+public class ViewPageServlet extends HttpServlet {
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see
+	 * javax.servlet.http.HttpServlet#doGet(javax.servlet.http.HttpServletRequest,
+	 * javax.servlet.http.HttpServletResponse)
+	 * 
+	 * Serve one of two "pages" showing either a login form (if no session is
+	 * registered with the request) or the number of "clicks" that are associated
+	 * with the session (if one exists).
+	 */
+	@Override
+	protected void doGet(HttpServletRequest req, HttpServletResponse res) throws IOException {
+		PrintWriter content = res.getWriter();
+
+		HttpSession session = req.getSession(false);
+
+		// set encoding/type
+		res.setContentType("text/html; charset=utf-8");
+		// set good status code
+		res.setStatus(HttpServletResponse.SC_OK);
+
+		if (session == null) {
+			// no session, show "login" form
+			content.print("&lt;h1&gt;");
+			content.print("Welcome! Type a username to login.");
+			content.println("&lt;/h1&gt;");
+
+			// write out form for setting username
+			content.println("&lt;form action=\"login\" method=\"GET\"&gt;");
+			content.println("username: &lt;input type=\"text\" name=\"username\" /&gt;&lt;br /&gt;");
+			content.println("&lt;input type=\"submit\" value=\"Submit\" /&gt;");
+			content.println("&lt;/form&gt;");
+		} else {
+			// session exists, show button clicker
+			String username = (String) session.getAttribute("username");
+			Integer clickCount = (Integer) session.getAttribute("clicks");
+
+			if (!Pattern.matches("[\\p{L}\\p{Digit}_-]+", username)) {
+				res.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid username characters");
+				return;
+			}
+			
+			content.print("&lt;h1&gt;");
+			content.print("Welcome, ");
+			content.print(username);
+			content.print("!");
+			content.println("&lt;/h1&gt;");
+
+			content.print("&lt;p&gt;");
+			content.print("You've clicked ");
+			content.print(clickCount);
+			content.print(" times!");
+			content.print("&lt;/p&gt;");
+
+			content.print("&lt;a href=\"action\"&gt;CLICK&lt;/a&gt;");
+		}
+	}
+}</code></pre>
+
+		</div>
+	</body>
+</html>
